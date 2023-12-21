@@ -6,6 +6,7 @@ import (
 	"sync"
 )
 
+// Getter getter data for a key
 type Getter interface {
 	Get(key string) ([]byte, error)
 }
@@ -24,7 +25,7 @@ type Group struct {
 
 var (
 	mu     sync.RWMutex
-	groups = make(map[string]*Group)
+	groups = sync.Map{}
 )
 
 func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
@@ -44,16 +45,14 @@ func NewGroup(name string, cacheBytes int64, getter Getter) *Group {
 		},
 	}
 
-	groups[name] = g
+	groups.Store(name, g)
 	return g
 }
 
 // GetGroup returns the named group
 func GetGroup(name string) *Group {
-	mu.RLock()
-	g := groups[name]
-	mu.RUnlock()
-	return g
+	v, _ := groups.Load(name)
+	return v.(*Group)
 }
 
 func (g *Group) Get(key string) (ByteView, error) {

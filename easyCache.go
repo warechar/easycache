@@ -21,6 +21,7 @@ type Group struct {
 	name      string // unique group name
 	getter    Getter
 	mainCache cache
+	peers     PeerPicker
 }
 
 var (
@@ -55,16 +56,8 @@ func GetGroup(name string) *Group {
 	return v.(*Group)
 }
 
-func (g *Group) Get(key string) (ByteView, error) {
-	if key == "" {
-		return ByteView{}, errors.New("key is required")
-	}
-
-	if v, ok := g.mainCache.get(key); ok {
-		log.Println("[easyCache] hit " + key)
-		return v, nil
-	}
-
+// get local value
+func (g *Group) getLocally(key string) (ByteView, error) {
 	// load value from getter if cache not found
 	bytes, err := g.getter.Get(key)
 	if err != nil {
@@ -74,7 +67,53 @@ func (g *Group) Get(key string) (ByteView, error) {
 	clone := make([]byte, len(bytes))
 	copy(clone, bytes) // protect cache data if input data updated
 	value := ByteView{b: clone}
+
 	g.mainCache.set(key, value)
 
 	return value, nil
+}
+
+func (g *Group) Get(key string) (ByteView, error) {
+	if key == "" {
+		return ByteView{}, errors.New("key is required")
+	}
+
+	// get locally cached first
+	if v, ok := g.mainCache.get(key); ok {
+		log.Println("[easyCache] hit " + key)
+		return v, nil
+	}
+
+	// if local cache does not exist, the cache is obtained from the remote peer
+	return g.load(key)
+}
+
+func (g *Group) RegisterPeers(peers PeerPicker) {
+	if g.peers != nil {
+		panic("register called more than once")
+	}
+
+	g.peers = peers
+}
+
+func (g *Group) load(key string) (ByteView, error) {
+	if g.peers != nil {
+		if peer, ok := g.peers.PickPeer(key); ok {
+			if value, err := g.getFromPeer(peer, key); err == nil {
+				return value, nil
+			}
+		}
+	}
+
+	return g.getLocally(key)
+}
+
+func (g *Group) getFromPeer(peer PeerGetter, key string) (ByteView, error) {
+
+	bytes, err := peer.Get(g.name, key)
+	if err != nil {
+		return ByteView{}, err
+	}
+
+	return ByteView{b: bytes}, nil
 }

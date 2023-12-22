@@ -17,7 +17,7 @@ type HttpPool struct {
 	self       string
 	basePath   string
 	peers      *Map
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	httpGetter map[string]*httpGetter
 }
 
@@ -25,9 +25,11 @@ type httpGetter struct {
 	baseUrl string
 }
 
+// Get http client
 func (h *httpGetter) Get(group string, key string) ([]byte, error) {
-	u := fmt.Sprintf("%v%v/%v", h.baseUrl, group, key)
+	u := fmt.Sprintf("%v/_easycache/%v/%v", h.baseUrl, group, key)
 
+	log.Println(u)
 	resp, err := http.Get(u)
 
 	if err != nil {
@@ -50,22 +52,23 @@ func (h *httpGetter) Get(group string, key string) ([]byte, error) {
 }
 
 func time33(data []byte) uint32 {
-	hash := int32(5381)
+	hash := uint32(5381)
 	m := md5.New()
 	md5Str := hex.EncodeToString(m.Sum(data))
 
 	for i := 0; i < 32; i++ {
-		hash += hash<<5 + int32(md5Str[i])
+		hash += hash<<5 + uint32(md5Str[i])
 	}
 
-	return uint32(hash & 0x7FFFFFFF)
+	return hash & 0x7FFFFFFF
 }
 
+// Set create peer on the pool's list of peers
 func (h *HttpPool) Set(peers ...string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.peers = New(defaultReplicas, time33)
+	h.peers = New(defaultReplicas, nil)
 	h.peers.Add(peers...) // add peers
 	h.httpGetter = make(map[string]*httpGetter, len(peers))
 
@@ -75,8 +78,8 @@ func (h *HttpPool) Set(peers ...string) {
 }
 
 func (h *HttpPool) PickPeer(key string) (PeerGetter, bool) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 
 	if peer := h.peers.Get(key); peer != "" && peer != h.self {
 		h.Log("pick peer %s", peer)
